@@ -8,4 +8,7 @@ dependencies = ["requests>=2.32.3", "setuptools>=75.8.0", "streamlit>=1.42.0"]
 
 # for streamlit hot-reloading
 [dependency-groups]
-dev = ["watchdog>=6.0.0"]
+dev = [
+    "rapidfuzz>=3.13.0",
+    "watchdog>=6.0.0",
+]

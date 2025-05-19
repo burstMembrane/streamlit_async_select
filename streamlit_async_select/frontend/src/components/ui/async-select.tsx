@@ -180,7 +180,7 @@ export function AsyncSelect<T>({
 
     return (
         <Popover open={open} onOpenChange={setOpen}>
-            <PopoverTrigger asChild>
+            <PopoverTrigger style={{ width: width, height: height }} asChild>
                 <Button
 
                     variant="outline"
@@ -190,9 +190,10 @@ export function AsyncSelect<T>({
                     className={cn(
                         "justify-between",
                         disabled && "opacity-50 cursor-not-allowed",
-                        triggerClassName
+                        triggerClassName,
+
                     )}
-                    style={{ width: width, height: height }}
+
                     disabled={disabled}
                 >
                     {selectedOption ? (
