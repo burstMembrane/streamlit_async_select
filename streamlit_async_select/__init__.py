@@ -30,6 +30,7 @@ def _process_search(search_function, key, query):
     st.session_state[key]["results"] = search_function(query)
 
 
+# @st.fragment
 def async_select(
     key: str,
     results: list[dict],
@@ -38,44 +39,47 @@ def async_select(
 ):
     if key not in st.session_state:
         _set_defaults(key, results)
-
+    st.session_state.fragment_runs += 1
     react_state = _component_func(
         results=st.session_state[key]["results"],
         key=st.session_state[key]["key_react"],
     )
-
+    st.write(f"React state: {react_state}")
     if react_state is None:
         return default
 
     interaction, value = react_state.get("interaction"), react_state.get("value")
-
     if interaction == "search" and search_function is not None:
         _process_search(search_function, key, value)
+        st.session_state[key]["submit_on_search"] = True
         st.rerun()
 
-    if interaction == "submit":
+    if interaction == "submit" or st.session_state[key].get("submit_on_search"):
+        st.session_state[key]["submit_on_search"] = False
+        st.write(f"Submitting value: {value}")
         return value
 
     return default
 
 
+@st.cache_data
 def search_results(query: str):
     print("searching for", query)
+    # def score(result):
+    #     title_score = fuzz.partial_ratio(query, result["title"])
+    #     artist_score = fuzz.partial_ratio(query, result["description"])
+    #     album_score = 0  # No album field in new results, so set to 0
+    #     return max(title_score, artist_score, album_score)
 
-    def score(result):
-        title_score = fuzz.partial_ratio(query, result["title"])
-        artist_score = fuzz.partial_ratio(query, result["description"])
-        album_score = 0  # No album field in new results, so set to 0
-        return max(title_score, artist_score, album_score)
-
-    return sorted(
-        [result for result in results if score(result) > 30],
-        key=score,
-        reverse=True,
-    )
+    # return sorted(
+    #     [result for result in results if score(result) > 30],
+    #     key=score,
+    #     reverse=True,
+    # )
+    return results
 
 
-results = [
+tracks = [
     {
         "id": "1",
         "title": "Bohemian Rhapsody",
@@ -131,7 +135,7 @@ results = [
         + ")",
         "image": result["coverImage"],
     }
-    for result in results
+    for result in tracks
 ]
 
 
@@ -147,7 +151,7 @@ if not _RELEASE:
         results=results,
         search_function=search_results,
     )
-
+    st.write(f"App runs: {st.session_state.app_runs}")
     if selected:
         st.write("Selected:", selected)
         st.session_state["selected"] = selected
