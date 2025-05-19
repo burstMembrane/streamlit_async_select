@@ -1,0 +1,11 @@
+[project]
+name = "streamlit_async_select"
+version = "0.1.0"
+description = "A async select component for streamlit"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = ["requests>=2.32.3", "setuptools>=75.8.0", "streamlit>=1.42.0"]
+
+# for streamlit hot-reloading
+[dependency-groups]
+dev = ["watchdog>=6.0.0"]
