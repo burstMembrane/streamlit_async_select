@@ -3,12 +3,24 @@ import {
     withStreamlitConnection,
     ComponentProps,
 } from "streamlit-component-lib"
-import { useEffect, ReactElement, useState, useRef, use, forwardRef } from "react"
+import { useEffect, ReactElement, useState, useRef, use, forwardRef, RefObject } from "react"
 import { AsyncSelect as AsyncSelectComponent } from "./components/ui/async-select"
 import { ResultDisplay } from "./components/ResultDisplay"
+import { useTheme, Theme } from "./components/theme-provider"
 
 
-
+export function useAutoHeight(elementRef: RefObject<any>, safeSize = 10) {
+    useEffect(() => {
+        if (!elementRef.current) return;
+        const resizeObserver = new ResizeObserver(() => {
+            console.log("[useAutoHeight] setting height: ", (elementRef.current.offsetHeight ?? 0) + safeSize)
+            Streamlit.setFrameHeight((elementRef.current.offsetHeight ?? 0) + safeSize)
+            // Do what you want to do when the size of the element changes
+        });
+        resizeObserver.observe(elementRef.current);
+        return () => resizeObserver.disconnect();
+    }, [safeSize]);
+}
 
 
 type Result = {
@@ -23,9 +35,18 @@ type AsyncSelectProps = ComponentProps & { height?: string | number }
 
 const AsyncSelect = forwardRef<HTMLDivElement, AsyncSelectProps>(({ args, disabled, theme, height }, ref) => {
     const [selectedResult, setSelectedResult] = useState<Result | null>(null)
-    const containerRef = useRef<HTMLDivElement>(null)
+    const [queryResults, setQueryResults] = useState<Result[]>([])
     const [options, setOptions] = useState<Result[]>(args.results || [])
+    const internalRef = useRef<HTMLDivElement>(null)
+    const { setTheme } = useTheme()
 
+    // set to base theme
+    useEffect(() => {
+        console.log("[AsyncSelect] setting theme: ", theme?.base)
+        setTheme(theme?.base as Theme || "system")
+    }, [theme])
+    useAutoHeight(internalRef)
+    const queryRef = useRef<string>("")
     useEffect(() => {
         if (!args.results) return
         setOptions(args.results || [])
@@ -37,37 +58,28 @@ const AsyncSelect = forwardRef<HTMLDivElement, AsyncSelectProps>(({ args, disabl
     }, [args.results])
 
     useEffect(() => {
-        console.log(args)
+        Streamlit.setComponentReady()
     }, [])
 
-    useEffect(() => {
-        setTimeout(() => {
-            if (containerRef.current) {
-                const observer = new ResizeObserver(() => {
-                    if (containerRef.current) {
-                        const height = containerRef.current.clientHeight || 300
-                        console.log(height)
-                        Streamlit.setFrameHeight(height + 200)
-                    }
-                })
-                observer.observe(containerRef.current)
-            }
-        }, 100)
-    }, [])
 
     const findResults = async (query?: string): Promise<Result[]> => {
-        console.log("[findResults]. Query: ", query)
         if (!query) {
-            Streamlit.setComponentValue({ interaction: "search", value: query })
-
+            return []
         }
+        if (query === queryRef.current) {
+            return queryResults
+        }
+        // console.log("[findResults]. Query: ", query)
+
         if (query && query.length > 0) {
             Streamlit.setComponentValue({ interaction: "search", value: query })
+            queryRef.current = query
+            setQueryResults(options.filter((result: Result) =>
+                result.title.toLowerCase().includes(query?.toLowerCase() || "") ||
+                result.description.toLowerCase().includes(query?.toLowerCase() || "")
+            ))
         }
-        return options.filter((result: Result) =>
-            result.title.toLowerCase().includes(query?.toLowerCase() || "") ||
-            result.description.toLowerCase().includes(query?.toLowerCase() || "")
-        )
+        return queryResults
     }
 
     const handleChange = (result: Result) => {
@@ -81,12 +93,18 @@ const AsyncSelect = forwardRef<HTMLDivElement, AsyncSelectProps>(({ args, disabl
                     results: options
                 }
             })
-        }, 20)
+        }, 100)
+        // set the height of the component
+        console.log("[AsyncSelect] setting height: ", internalRef.current?.offsetHeight ?? 0)
+
+        Streamlit.setFrameHeight(internalRef.current?.offsetHeight ?? 0);
+
 
     }
 
     return (
-        <div className="w-full h-full h-[120px]" ref={ref as React.RefObject<HTMLDivElement>} >
+        <div className="w-full h-full" ref={internalRef} >
+
             <AsyncSelectComponent<Result>
                 fetcher={findResults}
                 renderOption={(result) => (
@@ -120,7 +138,7 @@ const AsyncSelect = forwardRef<HTMLDivElement, AsyncSelectProps>(({ args, disabl
                     handleChange(result)
                 }}
                 width={args.width || '375px'}
-                height={args.height || '100%'}
+
                 loadingSkeleton={<div className="py-6 text-center text-sm">Loading...</div>}
             />
         </div>

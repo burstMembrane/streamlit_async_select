@@ -26,11 +26,26 @@ else:
     _component_func = components.declare_component("async_select", path=build_dir)
 
 
-def _set_defaults(key, default_results):
+def _set_defaults(
+    key: str,
+    default: Any,
+    default_searchterm: str = "",
+    default_options: List[Any] | None = None,
+) -> None:
     st.session_state[key] = {
-        "results": default_results,
-        "key_react": f"{key}_react_0",
+        # updated after each selection / reset
+        "result": default,
+        # updated after each search keystroke
+        "search": default_searchterm,
+        # updated after each search_function run
+        "options_js": [],
+        # key that is used by react component, use time suffix to reload after clear
+        "key_react": f"{key}_react_{str(time.time())}",
     }
+
+    if default_options:
+        st.session_state[key]["options_js"] = default_options
+        st.session_state[key]["options_py"] = default_options
 
 
 @st.cache_data
@@ -54,7 +69,7 @@ def _list_to_options_py(options: list[Any] | list[tuple[str, Any]]) -> list[Any]
     """
     unpack search options for proper python return types
     """
-    return [v[1] if isinstance(v, tuple) else v for v in options]
+    return options
 
 
 def _list_to_options_js(
@@ -63,14 +78,7 @@ def _list_to_options_js(
     """
     unpack search options for use in react component
     """
-    return [
-        {
-            "title": str(v[0]) if isinstance(v, tuple) else str(v),
-            "description": str(v[1]) if isinstance(v, tuple) else str(v),
-            "image": str(v[2]) if isinstance(v, tuple) else str(v),
-        }
-        for i, v in enumerate(options)
-    ]
+    return options
 
 
 def _process_search(
@@ -95,8 +103,8 @@ def _process_search(
     if search_results is None:
         search_results = []
 
-    st.session_state[key]["options_js"] = _list_to_options_js(search_results)
-    st.session_state[key]["options_py"] = _list_to_options_py(search_results)
+    st.session_state[key]["options_js"] = search_results
+    st.session_state[key]["options_py"] = search_results
 
     if rerun_on_update:
         ts_stop = datetime.datetime.now()
@@ -111,9 +119,8 @@ def _process_search(
 
 def async_select(
     key: str,
-    results: list[dict],
-    search_function: callable = None,
-    style_absolute: bool = False,
+    search_function: Callable[[str], List[Any]] = None,
+    style_absolute: bool = True,
     rerun_on_update: bool = True,
     rerun_scope: Literal["app", "fragment"] = "app",
     min_execution_time: int = 0,
@@ -129,14 +136,26 @@ def async_select(
     if key not in st.session_state:
         _set_defaults(
             key,
-            results,
+            default,
+            default_searchterm,
+            default_options,
         )
-
+    if "results" not in st.session_state[key]:
+        st.session_state[key]["results"] = results
     # everything here is passed to react as this.props.args
-    react_state = _component_func(
-        search_function=search_function,
-        results=st.session_state[key]["results"],
-        key=st.session_state[key]["key_react"],
+    container = stylable_container(
+        key=f"overlay_{key}",
+        css_styles="""
+    {{
+        background-color: transparent;
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        z-index: 999992;
+        display: "flex";
+    }}
+    """,
     )
 
     if style_absolute:
@@ -145,12 +164,17 @@ def async_select(
         st.markdown("")
 
         css = """
-        iframe[title="streamlit_searchbox.searchbox"] {
+        iframe[title="__init__.async_select"] {
             position: absolute;
             z-index: 10;
         }
         """
         st.markdown(f"<style>{css}</style>", unsafe_allow_html=True)
+    with container:
+        react_state = _component_func(
+            results=st.session_state[key]["options_py"],
+            key=st.session_state[key]["key_react"],
+        )
 
     if react_state is None:
         return st.session_state[key]["result"]
@@ -170,11 +194,7 @@ def async_select(
         )
 
     if interaction == "submit":
-        submit_value = (
-            st.session_state[key]["options_py"][value]
-            if "options_py" in st.session_state[key]
-            else value
-        )
+        submit_value = value
 
         # ensure submit_function only runs when value changed
         if st.session_state[key]["result"] != submit_value:
@@ -229,30 +249,36 @@ if "track_data" not in st.session_state:
     _choices = (df["title"] + " - " + df["artist"]).tolist()
     st.session_state["track_data"] = results
     st.session_state["choices"] = _choices
+    st.session_state["search_titles"] = df["title"].tolist()
+    st.session_state["search_artists"] = df["artist"].tolist()
 
 
 def search_results(query: str) -> list[dict]:
-    # 1) early exit on blank queriesImplement
-    if not query.strip():
+    if len(query) < 3:
         return []
-    results = st.session_state["track_data"]
-    choices = st.session_state["choices"]
-
-    # 2) call RapidFuzz in C, across all cores
-    distances = process.cdist(
-        [query],  # must be a list of queries
-        choices,
-        scorer=fuzz.WRatio,
+    df = st.session_state["track_data"]
+    titles = st.session_state["search_titles"]
+    artists = st.session_state["search_artists"]
+    # # compute distance arrays for titles and artists
+    distances_titles = process.cdist(
+        [query],
+        titles,
+        scorer=fuzz.partial_ratio,
         processor=utils.default_process,
         workers=-1,
-        score_cutoff=50,  # minimum threshold
-    )[0]  # Take the first (and only) row
-
-    # 3) Get indices where score is above 0 (already filtered by score_cutoff)
-    indices = np.where(distances > 0)[0]
-
-    # 4) slice your DataFrame once, and build the output list
-    subset = results.iloc[indices]
+    )[0]
+    distances_artists = process.cdist(
+        [query],
+        artists,
+        scorer=fuzz.partial_ratio,
+        processor=utils.default_process,
+        workers=-1,
+    )[0]
+    # combine distances and filter by threshold
+    distances = np.maximum(distances_titles, distances_artists)
+    indices = np.where(distances >= 30)[0]
+    # naive search based on title and artist
+    subset = df.iloc[indices]
     return [
         {
             "id": row["id"],
@@ -266,13 +292,13 @@ def search_results(query: str) -> list[dict]:
 
 def run_search():
     selected = async_select(
-        key="async_select",
-        results=[],
+        key="async-select",
         search_function=search_results,
+        default_options=st.session_state["track_data"].to_dict(orient="records")[:5],
+        rerun_on_update=False,
     )
-
-    if selected:
-        st.write("Selected:", selected)
+    st.markdown(f"### Selected: {selected}")
+    return
 
 
 if not _RELEASE:
@@ -282,6 +308,6 @@ if not _RELEASE:
         st.session_state["app_reruns"] = 0
     if "fragment_reruns" not in st.session_state:
         st.session_state["fragment_reruns"] = 0
-    run_search()
+    selected = run_search()
     st.session_state["app_reruns"] += 1
     st.write(f"App reruns: {st.session_state['app_reruns']}")

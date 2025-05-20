@@ -1,8 +1,9 @@
 import { cn } from "../../lib/utils";
 import { Button } from "../../components/ui/button";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef, RefObject } from "react";
 import { useDebounce } from "use-debounce";
 import { ChevronsUpDown, Loader2, Check } from "lucide-react";
+import { Streamlit } from "streamlit-component-lib";
 import {
     Command,
     CommandEmpty,
@@ -16,6 +17,20 @@ import {
     PopoverContent,
     PopoverTrigger,
 } from "../../components/ui/popover";
+
+export function useAutoHeight(elementRef: RefObject<any>, safeSize = 10) {
+    useEffect(() => {
+        if (!elementRef.current) return;
+        const resizeObserver = new ResizeObserver(() => {
+            console.log("[useAutoHeight] setting height: ", (elementRef.current.offsetHeight ?? 0) + safeSize)
+            Streamlit.setFrameHeight((elementRef.current.offsetHeight ?? 0) + safeSize)
+            // Do what you want to do when the size of the element changes
+        });
+        resizeObserver.observe(elementRef.current);
+        return () => resizeObserver.disconnect();
+    }, [safeSize]);
+}
+
 
 export interface Option {
     value: string;
@@ -97,7 +112,11 @@ export function AsyncSelect<T>({
     const [searchTerm, setSearchTerm] = useState("");
     const [debouncedSearchTerm] = useDebounce(searchTerm, preload ? 0 : 300);
     const [_originalOptions, setOriginalOptions] = useState<T[]>([]);
-
+    const commandRef = useRef<HTMLDivElement>(null);
+    const commandListRef = useRef<HTMLDivElement>(null);
+    const commandInputRef = useRef<HTMLInputElement>(null);
+    const triggerRef = useRef<HTMLButtonElement>(null);
+    const popoverRef = useRef<HTMLDivElement>(null);
     useEffect(() => {
         setMounted(true);
         setSelectedValue(value);
@@ -112,7 +131,22 @@ export function AsyncSelect<T>({
             }
         }
     }, [value, options, getOptionValue]);
+    // set height of command list
+    useEffect(() => {
+        const estimateHeight = () => {
 
+            const totalHeight = [
+                open ? triggerRef.current?.clientHeight ?? 0 : 0,
+                open ? commandInputRef.current?.clientHeight ?? 0 : 0,
+                open ? commandListRef.current?.clientHeight ?? 0 : 0,
+                open ? commandRef.current?.clientHeight ?? 0 : 0,
+                56,
+            ].reduce((acc, h) => acc + (h ?? 0), 0);
+            console.log("[async-select] setting height: ", totalHeight)
+            setTimeout(() => Streamlit.setFrameHeight(totalHeight), 10)
+        };
+        estimateHeight();
+    }, [options, open, value]);
     // Effect for initial fetch
     useEffect(() => {
         let isMounted = true;
@@ -175,85 +209,191 @@ export function AsyncSelect<T>({
         setSelectedValue(newValue);
         setSelectedOption(options.find((option) => getOptionValue(option) === newValue) || null);
         onChange(newValue);
-        setOpen(false);
-    }, [selectedValue, onChange, clearable, options, getOptionValue]);
+    }, [selectedValue, clearable, options, getOptionValue]);
+
+    const handleOpenChange = (open: boolean) => {
+        setOpen(open);
+
+
+
+
+    }
 
     return (
-        <Popover open={open} onOpenChange={setOpen}>
-            <PopoverTrigger style={{ width: width, height: height }} asChild>
-                <Button
-
-                    variant="outline"
-                    role="combobox"
-                    aria-expanded={open}
-
-                    className={cn(
-                        "justify-between",
-                        disabled && "opacity-50 cursor-not-allowed",
-                        triggerClassName,
-
-                    )}
-
-                    disabled={disabled}
-                >
-                    {selectedOption ? (
-                        getDisplayValue(selectedOption)
-                    ) : (
-                        placeholder
-                    )}
-                    <ChevronsUpDown className="opacity-50" size={10} />
-                </Button>
-            </PopoverTrigger>
-            <PopoverContent style={{ width: width }} className={cn("p-0", className)}>
-                <Command shouldFilter={false}>
-                    <div className="relative border-b w-full" style={{ height: height }}>
-                        <CommandInput
-                            style={{ height: height }}
-                            placeholder={`Search ${label.toLowerCase()}...`}
-                            value={searchTerm}
-                            onValueChange={(value) => {
-                                setSearchTerm(value);
-                            }}
-                        />
-                        {loading && options.length > 0 && (
-                            <div className="absolute right-2 top-1/2 transform -translate-y-1/2 flex items-center">
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                            </div>
-                        )}
-                    </div>
-                    <CommandList>
-                        {error && (
-                            <div className="p-4 text-destructive text-center">
-                                {error}
-                            </div>
-                        )}
-                        {loading && options.length === 0 && (
-                            loadingSkeleton || <DefaultLoadingSkeleton />
-                        )}
-                        {!loading && !error && options.length === 0 && (
-                            notFound || <CommandEmpty>{noResultsMessage ?? `No ${label.toLowerCase()} found.`}</CommandEmpty>
-                        )}
-                        <CommandGroup>
-                            {options.map((option) => (
-                                <CommandItem
-                                    key={getOptionValue(option)}
-                                    value={getOptionValue(option)}
-                                    onSelect={handleSelect}
-                                >
-                                    {renderOption(option)}
-                                    <Check
-                                        className={cn(
-                                            "ml-auto h-3 w-3",
-                                            selectedValue === getOptionValue(option) ? "opacity-100" : "opacity-0"
-                                        )}
-                                    />
-                                </CommandItem>
-                            ))}
-                        </CommandGroup>
-                    </CommandList>
-                </Command>
-            </PopoverContent>
+        <Popover ref={popoverRef} open={open} onOpenChange={handleOpenChange}>
+            <AsyncSelectTrigger
+                triggerRef={triggerRef}
+                width={width}
+                open={open}
+                disabled={disabled}
+                triggerClassName={triggerClassName}
+                placeholder={placeholder}
+                selectedOption={selectedOption}
+                getDisplayValue={getDisplayValue}
+            />
+            <AsyncSelectContent
+                className={className}
+                width={width}
+                commandRef={commandRef}
+                commandInputRef={commandInputRef}
+                commandListRef={commandListRef}
+                label={label}
+                searchTerm={searchTerm}
+                setSearchTerm={setSearchTerm}
+                loading={loading}
+                options={options}
+                error={error}
+                loadingSkeleton={loadingSkeleton}
+                notFound={notFound}
+                noResultsMessage={noResultsMessage}
+                getOptionValue={getOptionValue}
+                renderOption={renderOption}
+                selectedValue={selectedValue}
+                handleOpenChange={handleOpenChange}
+                handleSelect={(value) => {
+                    handleSelect(value);
+                    setOpen(false);
+                }}
+            />
         </Popover>
+    );
+}
+
+function AsyncSelectTrigger<T>({
+    triggerRef,
+    width,
+    open,
+    disabled,
+    triggerClassName,
+    placeholder,
+    selectedOption,
+    getDisplayValue,
+}: {
+    triggerRef: React.RefObject<HTMLButtonElement>;
+    width: string | number;
+    open: boolean;
+    disabled: boolean;
+    triggerClassName?: string;
+    placeholder: string;
+    selectedOption: T | null;
+    getDisplayValue: (option: T) => React.ReactNode;
+}) {
+    return (
+        <PopoverTrigger style={{ width: width }} asChild>
+            <Button
+                ref={triggerRef}
+                variant="outline"
+                role="combobox"
+                aria-expanded={open}
+                className={cn(
+                    "justify-between",
+                    disabled && "opacity-50 cursor-not-allowed",
+                    triggerClassName,
+                )}
+                disabled={disabled}
+            >
+                {selectedOption ? (
+                    getDisplayValue(selectedOption)
+                ) : (
+                    placeholder
+                )}
+                <ChevronsUpDown className="opacity-50" size={10} />
+            </Button>
+        </PopoverTrigger>
+    );
+}
+
+function AsyncSelectContent<T>({
+    className,
+    width,
+    commandRef,
+    commandInputRef,
+    commandListRef,
+    label,
+    searchTerm,
+    setSearchTerm,
+    loading,
+    options,
+    error,
+    loadingSkeleton,
+    notFound,
+    noResultsMessage,
+    getOptionValue,
+    renderOption,
+    selectedValue,
+    handleSelect,
+}: {
+    className?: string;
+    width: string | number;
+    commandRef: React.RefObject<HTMLDivElement>;
+    commandInputRef: React.RefObject<HTMLInputElement>;
+    commandListRef: React.RefObject<HTMLDivElement>;
+    label: string;
+    searchTerm: string;
+    setSearchTerm: (value: string) => void;
+    loading: boolean;
+    options: T[];
+    error: string | null;
+    loadingSkeleton?: React.ReactNode;
+    notFound?: React.ReactNode;
+    noResultsMessage?: string;
+    getOptionValue: (option: T) => string;
+    renderOption: (option: T) => React.ReactNode;
+    selectedValue: string;
+    handleSelect: (value: string) => void;
+}) {
+    return (
+        <PopoverContent style={{ width: width }} className={cn("p-0", className)}>
+            <Command ref={commandRef} shouldFilter={false}>
+                <div className="relative border-b w-full" >
+                    <CommandInput
+                        ref={commandInputRef}
+                        placeholder={`Search ${label.toLowerCase()}...`}
+                        value={searchTerm}
+                        onValueChange={(value) => {
+                            setSearchTerm(value);
+                        }}
+                    />
+                    {loading && options.length > 0 && (
+                        <div className="absolute right-2 top-1/2 transform -translate-y-1/2 flex items-center">
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                        </div>
+                    )}
+                </div>
+                <CommandList ref={commandListRef}>
+                    {error && (
+                        <div className="p-4 text-destructive text-center">
+                            {error}
+                        </div>
+                    )}
+                    {loading && options.length === 0 && (
+                        loadingSkeleton || <DefaultLoadingSkeleton />
+                    )}
+                    {!loading && !error && options.length === 0 && (
+                        notFound || <CommandEmpty>{noResultsMessage ?? `No ${label.toLowerCase()} found.`}</CommandEmpty>
+                    )}
+                    <CommandGroup>
+                        {options.map((option) => (
+                            <CommandItem
+                                key={getOptionValue(option)}
+                                value={getOptionValue(option)}
+                                onSelect={(value) => {
+                                    handleSelect(value);
+                                }}
+                            >
+                                {renderOption(option)}
+                                <Check
+                                    className={cn(
+                                        "ml-auto h-3 w-3",
+                                        selectedValue === getOptionValue(option) ? "opacity-100" : "opacity-0"
+                                    )}
+                                />
+                            </CommandItem>
+                        ))}
+                    </CommandGroup>
+                </CommandList>
+            </Command>
+        </PopoverContent>
     );
 }
 
