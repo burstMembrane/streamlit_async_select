@@ -3,7 +3,7 @@ import {
     withStreamlitConnection,
     ComponentProps,
 } from "streamlit-component-lib"
-import { useEffect, ReactElement, useState, useRef, use } from "react"
+import { useEffect, ReactElement, useState, useRef, use, forwardRef } from "react"
 import { AsyncSelect as AsyncSelectComponent } from "./components/ui/async-select"
 import { ResultDisplay } from "./components/ResultDisplay"
 
@@ -21,12 +21,13 @@ type Result = {
 // Add height prop to the component props
 type AsyncSelectProps = ComponentProps & { height?: string | number }
 
-function AsyncSelect({ args, disabled, theme, height }: AsyncSelectProps): ReactElement {
+const AsyncSelect = forwardRef<HTMLDivElement, AsyncSelectProps>(({ args, disabled, theme, height }, ref) => {
     const [selectedResult, setSelectedResult] = useState<Result | null>(null)
     const containerRef = useRef<HTMLDivElement>(null)
     const [options, setOptions] = useState<Result[]>(args.results || [])
 
     useEffect(() => {
+        if (!args.results) return
         setOptions(args.results || [])
         // If the selectedResultId is still present in new options, keep it selected
         if (selectedResult) {
@@ -56,6 +57,10 @@ function AsyncSelect({ args, disabled, theme, height }: AsyncSelectProps): React
 
     const findResults = async (query?: string): Promise<Result[]> => {
         console.log("[findResults]. Query: ", query)
+        if (!query) {
+            Streamlit.setComponentValue({ interaction: "search", value: query })
+
+        }
         if (query && query.length > 0) {
             Streamlit.setComponentValue({ interaction: "search", value: query })
         }
@@ -65,18 +70,23 @@ function AsyncSelect({ args, disabled, theme, height }: AsyncSelectProps): React
         )
     }
 
-    const handleChange = (result: Result | null) => {
-        if (result) {
-            console.log("[handleChange]. Submitting result: ", result)
-            setSelectedResult(result)
-            Streamlit.setComponentValue({ interaction: "submit", value: result })
-        } else {
-            setSelectedResult(null)
-        }
+    const handleChange = (result: Result) => {
+        console.log("handleChange", result)
+
+        setTimeout(() => {
+            Streamlit.setComponentValue({
+                interaction: "submit",
+                value: result,
+                context: {
+                    results: options
+                }
+            })
+        }, 20)
+
     }
 
     return (
-        <div ref={containerRef} style={{ height: height || '100%' }}>
+        <div className="w-full h-full h-[120px]" ref={ref as React.RefObject<HTMLDivElement>} >
             <AsyncSelectComponent<Result>
                 fetcher={findResults}
                 renderOption={(result) => (
@@ -115,6 +125,6 @@ function AsyncSelect({ args, disabled, theme, height }: AsyncSelectProps): React
             />
         </div>
     )
-}
+})
 
 export default withStreamlitConnection(AsyncSelect)

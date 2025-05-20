@@ -2,10 +2,13 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'path'
 import tailwindcss from "@tailwindcss/vite"
+// @ts-expect-error - no TS types yet for beta test.
+import PluginObject from 'babel-plugin-react-compiler'
+
 // https://vite.dev/config/
 export default defineConfig({
   base: "./",
-  plugins: [react(), tailwindcss()],
+  plugins: [[PluginObject], react(), tailwindcss()],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),

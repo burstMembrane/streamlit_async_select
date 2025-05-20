@@ -1,9 +1,16 @@
+import datetime
+import re
 import time
 from pathlib import Path
+from typing import Any, Callable, List, Literal
 
+import numpy as np
+import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
-from rapidfuzz import fuzz
+from rapidfuzz import fuzz, process, utils
+from streamlit import rerun
+from streamlit_extras.stylable_container import stylable_container
 
 _RELEASE = False
 if not _RELEASE:
@@ -22,136 +29,259 @@ else:
 def _set_defaults(key, default_results):
     st.session_state[key] = {
         "results": default_results,
-        "key_react": f"{key}_react_{str(time.time())}",
+        "key_react": f"{key}_react_0",
     }
 
 
-def _process_search(search_function, key, query):
-    st.session_state[key]["results"] = search_function(query)
+@st.cache_data
+def load_track_data():
+    df = pd.read_csv(
+        Path(__file__).parent / "data" / "track_info_filtered.csv",
+        usecols=["track_id", "title", "artist", "album", "release_year", "cover"],
+    )
+    return df
 
 
-# @st.fragment
+def _rerun(rerun_scope: Literal["app", "fragment"]) -> None:
+    # only pass scope if the version is >= 1.37
+    if st.__version__ >= "1.37":
+        rerun(scope=rerun_scope)  # type: ignore
+    else:
+        rerun()
+
+
+def _list_to_options_py(options: list[Any] | list[tuple[str, Any]]) -> list[Any]:
+    """
+    unpack search options for proper python return types
+    """
+    return [v[1] if isinstance(v, tuple) else v for v in options]
+
+
+def _list_to_options_js(
+    options: list[Any] | list[tuple[str, Any]],
+) -> list[dict[str, Any]]:
+    """
+    unpack search options for use in react component
+    """
+    return [
+        {
+            "title": str(v[0]) if isinstance(v, tuple) else str(v),
+            "description": str(v[1]) if isinstance(v, tuple) else str(v),
+            "image": str(v[2]) if isinstance(v, tuple) else str(v),
+        }
+        for i, v in enumerate(options)
+    ]
+
+
+def _process_search(
+    search_function: Callable[[str], List[Any]],
+    key: str,
+    searchterm: str,
+    rerun_on_update: bool,
+    rerun_scope: Literal["app", "fragment"] = "app",
+    min_execution_time: int = 0,
+    **kwargs,
+) -> None:
+    # nothing changed, avoid new search
+    if searchterm == st.session_state[key]["search"]:
+        return
+
+    st.session_state[key]["search"] = searchterm
+
+    ts_start = datetime.datetime.now()
+
+    search_results = search_function(searchterm, **kwargs)
+
+    if search_results is None:
+        search_results = []
+
+    st.session_state[key]["options_js"] = _list_to_options_js(search_results)
+    st.session_state[key]["options_py"] = _list_to_options_py(search_results)
+
+    if rerun_on_update:
+        ts_stop = datetime.datetime.now()
+        execution_time_ms = (ts_stop - ts_start).total_seconds() * 1000
+
+        # wait until minimal execution time is reached
+        if execution_time_ms < min_execution_time:
+            time.sleep((min_execution_time - execution_time_ms) / 1000)
+
+        _rerun(rerun_scope)
+
+
 def async_select(
     key: str,
     results: list[dict],
     search_function: callable = None,
-    default: str = "",
+    style_absolute: bool = False,
+    rerun_on_update: bool = True,
+    rerun_scope: Literal["app", "fragment"] = "app",
+    min_execution_time: int = 0,
+    submit_function: Callable[[Any], None] = None,
+    clear_on_submit: bool = False,
+    default_searchterm: str = "",
+    default_use_searchterm: bool = False,
+    default_options: List[Any] | None = None,
+    default: Any = None,
+    reset_function: Callable[[], None] | None = None,
+    **kwargs,
 ):
     if key not in st.session_state:
-        _set_defaults(key, results)
-    st.session_state.fragment_runs += 1
+        _set_defaults(
+            key,
+            results,
+        )
+
+    # everything here is passed to react as this.props.args
     react_state = _component_func(
+        search_function=search_function,
         results=st.session_state[key]["results"],
         key=st.session_state[key]["key_react"],
     )
-    st.write(f"React state: {react_state}")
+
+    if style_absolute:
+        # add empty markdown blocks to reserve space for the iframe
+        st.markdown("")
+        st.markdown("")
+
+        css = """
+        iframe[title="streamlit_searchbox.searchbox"] {
+            position: absolute;
+            z-index: 10;
+        }
+        """
+        st.markdown(f"<style>{css}</style>", unsafe_allow_html=True)
+
     if react_state is None:
+        return st.session_state[key]["result"]
+
+    interaction, value = react_state["interaction"], react_state["value"]
+
+    if interaction == "search":
+        # triggers rerun, no ops afterwards executed
+        _process_search(
+            search_function,
+            key,
+            value,
+            rerun_on_update,
+            rerun_scope=rerun_scope,
+            min_execution_time=min_execution_time,
+            **kwargs,
+        )
+
+    if interaction == "submit":
+        submit_value = (
+            st.session_state[key]["options_py"][value]
+            if "options_py" in st.session_state[key]
+            else value
+        )
+
+        # ensure submit_function only runs when value changed
+        if st.session_state[key]["result"] != submit_value:
+            st.session_state[key]["result"] = submit_value
+            if submit_function is not None:
+                submit_function(submit_value)
+
+        if clear_on_submit:
+            _set_defaults(
+                key,
+                st.session_state[key]["result"],
+                default_searchterm,
+                default_options,
+            )
+            _rerun(rerun_scope)
+
+        return st.session_state[key]["result"]
+
+    if interaction == "reset":
+        _set_defaults(
+            key,
+            default,
+            default_searchterm,
+            default_options,
+        )
+
+        if reset_function is not None:
+            reset_function()
+
+        if rerun_on_update:
+            _rerun(rerun_scope)
+
         return default
 
-    interaction, value = react_state.get("interaction"), react_state.get("value")
-    if interaction == "search" and search_function is not None:
-        _process_search(search_function, key, value)
-        st.session_state[key]["submit_on_search"] = True
-        st.rerun()
-
-    if interaction == "submit" or st.session_state[key].get("submit_on_search"):
-        st.session_state[key]["submit_on_search"] = False
-        st.write(f"Submitting value: {value}")
-        return value
-
-    return default
+    # no new react interaction happened
+    return st.session_state[key]["result"]
 
 
-@st.cache_data
-def search_results(query: str):
-    print("searching for", query)
-    # def score(result):
-    #     title_score = fuzz.partial_ratio(query, result["title"])
-    #     artist_score = fuzz.partial_ratio(query, result["description"])
-    #     album_score = 0  # No album field in new results, so set to 0
-    #     return max(title_score, artist_score, album_score)
-
-    # return sorted(
-    #     [result for result in results if score(result) > 30],
-    #     key=score,
-    #     reverse=True,
-    # )
-    return results
-
-
-tracks = [
-    {
-        "id": "1",
-        "title": "Bohemian Rhapsody",
-        "artist": "Queen",
-        "album": "A Night at the Opera",
-        "releaseYear": 1975,
-        "coverImage": "https://upload.wikimedia.org/wikipedia/en/9/9f/Bohemian_Rhapsody.png",
-    },
-    {
-        "id": "2",
-        "title": "Imagine",
-        "artist": "John Lennon",
-        "album": "Imagine",
-        "releaseYear": 1971,
-        "coverImage": "https://upload.wikimedia.org/wikipedia/commons/thumb/7/7c/John_Lennon_Imagine_1971.jpg/640px-John_Lennon_Imagine_1971.jpg",
-    },
-    {
-        "id": "3",
-        "title": "Billie Jean",
-        "artist": "Michael Jackson",
-        "album": "Thriller",
-        "releaseYear": 1982,
-        "coverImage": "https://t2.genius.com/unsafe/300x300/https%3A%2F%2Fimages.genius.com%2F9d06855287d0a499835ca1453317d6ec.1000x1000x1.jpg",
-    },
-    {
-        "id": "4",
-        "title": "Like a Rolling Stone",
-        "artist": "Bob Dylan",
-        "album": "Highway 61 Revisited",
-        "releaseYear": 1965,
-        "coverImage": "https://external-content.duckduckgo.com/iu/?u=https%3A%2F%2Fimg.discogs.com%2Fjd7vBzdcX0Sa1qS7MeD1xktyeYo%3D%2Ffit-in%2F600x600%2Ffilters%3Astrip_icc()%3Aformat(jpeg)%3Amode_rgb()%3Aquality(90)%2Fdiscogs-images%2FR-2932006-1370464524-6928.jpeg.jpg&f=1&nofb=1&ipt=ff4d4043369302c17020a683a2dbb05233f932d612a481cd283f21c407a61a3b",
-    },
-    {
-        "id": "5",
-        "title": "Smells Like Teen Spirit",
-        "artist": "Nirvana",
-        "album": "Nevermind",
-        "releaseYear": 1991,
-        "coverImage": "https://upload.wikimedia.org/wikipedia/en/b/b7/NirvanaNevermindalbumcover.jpg",
-    },
-]
+if "track_data" not in st.session_state:
+    df = load_track_data()
+    # convert to id, title, description, image
+    results = [
+        {
+            "id": row["track_id"],
+            "title": row["title"],
+            "description": f"{row['artist']} ({int(row['release_year'])})",
+            "image": row["cover"],
+        }
+        for _, row in df.iterrows()
+    ]
+    results = pd.DataFrame(results)
+    _choices = (df["title"] + " - " + df["artist"]).tolist()
+    st.session_state["track_data"] = results
+    st.session_state["choices"] = _choices
 
 
-results = [
-    {
-        "id": result["id"],
-        "title": result["title"],
-        "description": result["artist"]
-        + " - "
-        + result["album"]
-        + " ("
-        + str(result["releaseYear"])
-        + ")",
-        "image": result["coverImage"],
-    }
-    for result in tracks
-]
+def search_results(query: str) -> list[dict]:
+    # 1) early exit on blank queriesImplement
+    if not query.strip():
+        return []
+    results = st.session_state["track_data"]
+    choices = st.session_state["choices"]
+
+    # 2) call RapidFuzz in C, across all cores
+    distances = process.cdist(
+        [query],  # must be a list of queries
+        choices,
+        scorer=fuzz.WRatio,
+        processor=utils.default_process,
+        workers=-1,
+        score_cutoff=50,  # minimum threshold
+    )[0]  # Take the first (and only) row
+
+    # 3) Get indices where score is above 0 (already filtered by score_cutoff)
+    indices = np.where(distances > 0)[0]
+
+    # 4) slice your DataFrame once, and build the output list
+    subset = results.iloc[indices]
+    return [
+        {
+            "id": row["id"],
+            "title": row["title"],
+            "description": row["description"],
+            "image": row["image"],
+        }
+        for _, row in subset.iterrows()
+    ]
+
+
+def run_search():
+    selected = async_select(
+        key="async_select",
+        results=[],
+        search_function=search_results,
+    )
+
+    if selected:
+        st.write("Selected:", selected)
 
 
 if not _RELEASE:
     import streamlit as st
 
-    if "selected" not in st.session_state:
-        st.session_state["selected"] = None
-
-    st.subheader("async_select")
-    selected = async_select(
-        key="async_select",
-        results=results,
-        search_function=search_results,
-    )
-    st.write(f"App runs: {st.session_state.app_runs}")
-    if selected:
-        st.write("Selected:", selected)
-        st.session_state["selected"] = selected
+    if "app_reruns" not in st.session_state:
+        st.session_state["app_reruns"] = 0
+    if "fragment_reruns" not in st.session_state:
+        st.session_state["fragment_reruns"] = 0
+    run_search()
+    st.session_state["app_reruns"] += 1
+    st.write(f"App reruns: {st.session_state['app_reruns']}")
