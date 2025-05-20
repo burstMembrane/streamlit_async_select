@@ -8,7 +8,6 @@ A async select component for streamlit
 pip install streamlit_async_select
 ```
 
-
 ## Development
 
 To develop the component, run the following command:

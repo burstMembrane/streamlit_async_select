@@ -3,7 +3,7 @@ import {
     withStreamlitConnection,
     ComponentProps,
 } from "streamlit-component-lib"
-import { useEffect, ReactElement, useState, useRef, use, forwardRef, RefObject } from "react"
+import { useEffect, useState, useRef, forwardRef, RefObject } from "react"
 import { AsyncSelect as AsyncSelectComponent } from "./components/ui/async-select"
 import { ResultDisplay } from "./components/ResultDisplay"
 import { useTheme, Theme } from "./components/theme-provider"
@@ -33,7 +33,7 @@ type Result = {
 // Add height prop to the component props
 type AsyncSelectProps = ComponentProps & { height?: string | number }
 
-const AsyncSelect = forwardRef<HTMLDivElement, AsyncSelectProps>(({ args, disabled, theme, height }, ref) => {
+const AsyncSelect = forwardRef<HTMLDivElement, AsyncSelectProps>(({ args, theme }) => {
     const [selectedResult, setSelectedResult] = useState<Result | null>(null)
     const [queryResults, setQueryResults] = useState<Result[]>([])
     const [options, setOptions] = useState<Result[]>(args.results || [])
@@ -52,7 +52,7 @@ const AsyncSelect = forwardRef<HTMLDivElement, AsyncSelectProps>(({ args, disabl
         setOptions(args.results || [])
         // If the selectedResultId is still present in new options, keep it selected
         if (selectedResult) {
-            const found = (args.results || []).find(r => r.id === selectedResult.id)
+            const found = (args.results || []).find((r: Result) => r.id === selectedResult.id)
             setSelectedResult(found || null)
         }
     }, [args.results])
@@ -127,7 +127,7 @@ const AsyncSelect = forwardRef<HTMLDivElement, AsyncSelectProps>(({ args, disabl
                 notFound={<div className="py-6 text-center text-sm">No results found</div>}
                 label="Result"
                 placeholder="Search results..."
-                value={selectedResult}
+                value=""
                 onChange={(id) => {
                     const result = options.find(r => r.id === id)
                     if (!result) {

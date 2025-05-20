@@ -1,5 +1,4 @@
 import datetime
-import re
 import time
 from pathlib import Path
 from typing import Any, Callable, List, Literal
@@ -152,6 +151,7 @@ def async_select(
         top: 0;
         left: 0;
         width: 100%;
+        height: 100%;
         z-index: 999992;
         display: "flex";
     }}
@@ -166,7 +166,7 @@ def async_select(
         css = """
         iframe[title="__init__.async_select"] {
             position: absolute;
-            z-index: 10;
+            z-index: 999992;
         }
         """
         st.markdown(f"<style>{css}</style>", unsafe_allow_html=True)

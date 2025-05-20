@@ -2,7 +2,6 @@
 
 A async select component for streamlit
 
-
 This is the frontend for the  component.
 
 ## Development

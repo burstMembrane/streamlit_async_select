@@ -96,7 +96,7 @@ export function AsyncSelect<T>({
     onChange,
     disabled = false,
     width = "200px",
-    height = "300px",
+
     className,
     triggerClassName,
     noResultsMessage,
@@ -116,7 +116,7 @@ export function AsyncSelect<T>({
     const commandListRef = useRef<HTMLDivElement>(null);
     const commandInputRef = useRef<HTMLInputElement>(null);
     const triggerRef = useRef<HTMLButtonElement>(null);
-    const popoverRef = useRef<HTMLDivElement>(null);
+
     useEffect(() => {
         setMounted(true);
         setSelectedValue(value);
@@ -220,9 +220,9 @@ export function AsyncSelect<T>({
     }
 
     return (
-        <Popover ref={popoverRef} open={open} onOpenChange={handleOpenChange}>
+        <Popover open={open} onOpenChange={handleOpenChange}>
             <AsyncSelectTrigger
-                triggerRef={triggerRef}
+                triggerRef={triggerRef as any}
                 width={width}
                 open={open}
                 disabled={disabled}
@@ -234,9 +234,9 @@ export function AsyncSelect<T>({
             <AsyncSelectContent
                 className={className}
                 width={width}
-                commandRef={commandRef}
-                commandInputRef={commandInputRef}
-                commandListRef={commandListRef}
+                commandRef={commandRef as any}
+                commandInputRef={commandInputRef as any}
+                commandListRef={commandListRef as any}
                 label={label}
                 searchTerm={searchTerm}
                 setSearchTerm={setSearchTerm}
@@ -249,7 +249,7 @@ export function AsyncSelect<T>({
                 getOptionValue={getOptionValue}
                 renderOption={renderOption}
                 selectedValue={selectedValue}
-                handleOpenChange={handleOpenChange}
+
                 handleSelect={(value) => {
                     handleSelect(value);
                     setOpen(false);
